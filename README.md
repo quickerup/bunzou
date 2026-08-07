@@ -4,15 +4,15 @@ A state-machine-shaped smart contract language for TON, designed around
 linear resource consumption and an algebraic State × Message matrix that's
 checked for exhaustiveness at compile time.
 
-**Status: pre-alpha, not a working compiler yet.** This repo currently
+**Status: pre-alpha (end-to-end for core subset).** This repo currently
 contains a design (`docs/spec.md`), a pipeline plan (`docs/architecture.md`),
-and a stage-1 frontend (lexer, parser, name resolution, two of six semantic
-passes — Layer 1 linear consumption, now path-sensitive across `if`/`else`
-branches, and Layer 4 State × Message exhaustiveness) that runs against real
-`.bunzou` source, with an automated test suite (39 cases: lexer, parser,
-checker) covering it. It does not yet produce TVM bytecode. See
-`docs/architecture.md` §5 for what's unresolved, stated plainly, and
-`compiler/src/codegen/README.md` for the largest remaining gap.
+and a working compiler pipeline for the core language features. The compiler
+features a frontend (lexer, parser, name resolution, Layer 1 linear
+consumption across conditional branches, and Layer 4 State × Message
+exhaustiveness) and a codegen backend. Codegen lowers Bunzou AST to FunC
+text, which is then compiled into verifiable BOCs via `@ton-community/func-js`.
+The automated test suite (42 tests) covers parsing, semantic checks, codegen,
+and full `@ton/sandbox` integration testing.
 
 ## Start here
 
@@ -40,9 +40,10 @@ npx tsc
 node dist/index.js test/fixtures/counter.bunzou
 ```
 
-Runs the stage-1 frontend against the spec's own counter contract
-(`docs/spec.md` §5). No codegen exists, so this validates and type-checks
-only — it does not produce a deployable contract.
+Runs the compiler frontend (parser and type checker) against the spec's own
+counter contract (`docs/spec.md` §5). To see the entire end-to-end pipeline
+including codegen and sandbox execution, run `./demo.sh` from the repository
+root instead.
 
 ## Testing
 
@@ -55,5 +56,5 @@ npm test
 Compiles `src/` and `test/` together (`tsconfig.test.json`) and runs the
 result with Node's built-in test runner. Covers the lexer, the parser
 (including expression precedence and if/else/else-if shapes), and the
-checker — both `.bunzou` fixtures under `test/fixtures/` and inline
-synthetic cases for each diagnostic the checker can currently produce.
+checker, codegen lowering, BOC compilation, and sandbox execution — both
+`.bunzou` fixtures under `test/fixtures/` and inline synthetic cases.
