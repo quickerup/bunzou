@@ -1,0 +1,55 @@
+state CounterState {
+    Active(CounterData),
+    Locked(CounterData)
+}
+
+struct CounterData {
+    count: uint64,
+    owner: addr
+}
+
+behavior Active {
+    on Increment(msg) -> Active {
+        consume(self);
+        return Active(CounterData { count: self.count + 1, owner: self.owner });
+    }
+
+    on Reset(msg) -> Active {
+        require(msg.sender == self.owner, "only owner can reset");
+        consume(self);
+        return Active(CounterData { count: 0, owner: self.owner });
+    }
+
+    on Lock(msg) -> Locked {
+        require(msg.sender == self.owner, "only owner can lock");
+        consume(self);
+        return Locked(self);
+    }
+
+    on Unlock(msg) -> Active {
+        reject("counter is already unlocked");
+        return self;
+    }
+}
+
+behavior Locked {
+    on Increment(msg) -> Locked {
+        reject("counter is locked");
+        return self;
+    }
+
+    on Lock(msg) -> Locked {
+        reject("counter is already locked");
+        return self;
+    }
+
+    on Unlock(msg) -> Active {
+        require(msg.sender == self.owner, "only owner can unlock");
+        consume(self);
+        return Active(self);
+    }
+}
+
+get_method get_count(): uint64 {
+    return self.count;
+}
