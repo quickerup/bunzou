@@ -136,11 +136,32 @@ function checkExhaustiveness(program: Program, sym: SymbolTable, diags: Diagnost
 
 // ---- Layer 1: linear consumption ----
 // Ported from linear.py's Consume/Return logic (validated in isolation) onto
-// real handler bodies for the first time. Simplified for stage 1: no branching
-// constructs exist in the grammar yet (see parser.ts), so "every path" reduces
-// to "the handler's single straight-line body" — the balanced-branch case
-// (spec Layer 1: "requires balanced consumption across if branches") is
-// deliberately out of scope until the grammar grows conditionals.
+// real handler bodies. Now that the grammar has `if`/`else` (parser.ts), this
+// walks every execution path through the handler body — spec Layer 1
+// requires balanced consumption across if branches, not just a single
+// straight-line body.
+//
+// Approach: walk each block carrying a set of "open" path states (one per
+// execution path that has reached this point without yet returning). A
+// return closes every currently-open path with its accumulated
+// consume/reject state; an `if` splits the open paths into a then-set and an
+// else-set (an absent `else` behaves like an empty block, i.e. the state
+// passes through unchanged) and both are walked independently, since they're
+// genuinely different executions that must each satisfy the same rule.
+
+interface PathState {
+  consumeCount: number;
+  hasReject: boolean;
+}
+
+interface ClosedPath extends PathState {
+  pos: Position; // the return statement that terminated this path
+}
+
+interface BlockResult {
+  closed: ClosedPath[]; // paths that hit `return` inside this block
+  open: PathState[]; // paths that fell through without returning
+}
 
 function isCall(e: Expr, name: string): boolean {
   return e.kind === 'Call' && e.callee.kind === 'Ident' && e.callee.name === name;
@@ -150,42 +171,63 @@ function isConsumeSelf(e: Expr): boolean {
   return isCall(e, 'consume') && e.kind === 'Call' && e.args.length === 1 && e.args[0].kind === 'SelfExpr';
 }
 
-function checkLinearConsumption(handler: OnHandler, ownerVariant: string, diags: Diagnostic[]) {
-  let consumeCount = 0;
-  let hasReject = false;
-  let lastIsReturn = false;
+function applyExprStmt(st: PathState, expr: Expr): PathState {
+  if (isConsumeSelf(expr)) return { consumeCount: st.consumeCount + 1, hasReject: st.hasReject };
+  if (isCall(expr, 'reject')) return { consumeCount: st.consumeCount, hasReject: true };
+  return st;
+}
 
-  handler.body.forEach((stmt: Stmt, idx: number) => {
-    lastIsReturn = stmt.kind === 'ReturnStmt';
-    if (stmt.kind === 'ExprStmt') {
-      if (isConsumeSelf(stmt.expr)) consumeCount++;
-      if (isCall(stmt.expr, 'reject')) hasReject = true;
+function walkBlock(stmts: Stmt[], initial: PathState[]): BlockResult {
+  let open = initial;
+  const closed: ClosedPath[] = [];
+
+  for (const stmt of stmts) {
+    if (open.length === 0) break; // every path already returned; rest is dead code
+
+    if (stmt.kind === 'ReturnStmt') {
+      for (const st of open) closed.push({ ...st, pos: stmt.pos });
+      open = [];
+    } else if (stmt.kind === 'ExprStmt') {
+      open = open.map(st => applyExprStmt(st, stmt.expr));
+    } else if (stmt.kind === 'IfStmt') {
+      const thenResult = walkBlock(stmt.thenBranch, open.map(st => ({ ...st })));
+      const elseInitial = open.map(st => ({ ...st }));
+      const elseResult = stmt.elseBranch
+        ? walkBlock(stmt.elseBranch, elseInitial)
+        : { closed: [] as ClosedPath[], open: elseInitial };
+      closed.push(...thenResult.closed, ...elseResult.closed);
+      open = [...thenResult.open, ...elseResult.open];
     }
-  });
+  }
 
+  return { closed, open };
+}
+
+function checkLinearConsumption(handler: OnHandler, ownerVariant: string, diags: Diagnostic[]) {
   const label = `(${ownerVariant}, ${handler.message})`;
+  const { closed, open } = walkBlock(handler.body, [{ consumeCount: 0, hasReject: false }]);
 
-  if (!lastIsReturn) {
+  if (open.length > 0) {
     diags.push({ message: `handler ${label}: must end with a return on every path`, pos: handler.pos });
   }
 
-  if (hasReject) {
-    if (consumeCount !== 0) {
-      diags.push({
-        message: `handler ${label}: reject(...) path must not also consume(self) — a rejection returns the input state unchanged`,
-        pos: handler.pos,
-      });
-    }
-  } else {
-    if (consumeCount === 0) {
+  for (const path of closed) {
+    if (path.hasReject) {
+      if (path.consumeCount !== 0) {
+        diags.push({
+          message: `handler ${label}: reject(...) path must not also consume(self) — a rejection returns the input state unchanged`,
+          pos: path.pos,
+        });
+      }
+    } else if (path.consumeCount === 0) {
       diags.push({
         message: `handler ${label}: state-transitioning path never calls consume(self) — value may be used twice or leaked`,
-        pos: handler.pos,
+        pos: path.pos,
       });
-    } else if (consumeCount > 1) {
+    } else if (path.consumeCount > 1) {
       diags.push({
-        message: `handler ${label}: consume(self) called ${consumeCount} times on one path — double-consumption`,
-        pos: handler.pos,
+        message: `handler ${label}: consume(self) called ${path.consumeCount} times on one path — double-consumption`,
+        pos: path.pos,
       });
     }
   }
