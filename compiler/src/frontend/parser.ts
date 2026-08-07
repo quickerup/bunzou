@@ -1,7 +1,7 @@
 import { Token, tokenize } from '../frontend/lexer';
 import {
   Program, TopDecl, StateDecl, StateVariant, StructDecl, StructField,
-  BehaviorDecl, OnHandler, GetMethodDecl, Stmt, Expr, Position,
+  BehaviorDecl, OnHandler, GetMethodDecl, Stmt, IfStmt, Expr, Position,
 } from '../frontend/ast';
 
 export class ParseError extends Error {
@@ -184,10 +184,33 @@ export function parse(source: string): Program {
       expect('PUNCT', ';');
       return { kind: 'ReturnStmt', value, pos: p };
     }
+    if (at('KEYWORD', 'if')) {
+      return parseIfStmt();
+    }
     const p = peek().pos;
     const expr = parseExpr();
     expect('PUNCT', ';');
     return { kind: 'ExprStmt', expr, pos: p };
+  }
+
+  // if (cond) { ... } else { ... }
+  // if (cond) { ... } else if (cond2) { ... }   -- chains via a one-element else block
+  function parseIfStmt(): IfStmt {
+    const startPos = expect('KEYWORD', 'if').pos;
+    expect('PUNCT', '(');
+    const cond = parseExpr();
+    expect('PUNCT', ')');
+    const thenBranch = parseBlock();
+    let elseBranch: Stmt[] | null = null;
+    if (at('KEYWORD', 'else')) {
+      next();
+      if (at('KEYWORD', 'if')) {
+        elseBranch = [parseIfStmt()];
+      } else {
+        elseBranch = parseBlock();
+      }
+    }
+    return { kind: 'IfStmt', cond, thenBranch, elseBranch, pos: startPos };
   }
 
   // ---- expressions (precedence climbing) ----

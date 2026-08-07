@@ -55,15 +55,15 @@ compiler's job, entirely.
         │                can be trusted)
         ▼
 ┌───────────────────┐
-│ 6. Codegen         │  NEVER PROTOTYPED. Lowers the checked, gas-bound,
-│    (→ Fift asm)    │  cell-planned IR to actual TVM instructions.
-└───────────────────┘  This is the real compiler, not a checker.
-        │
+│ 6. Codegen         │  Lowers the checked, gas-bound, cell-planned IR
+│    (→ FunC text)   │  to FunC text. This deviates from the original
+└───────────────────┘  Fift target plan because Fift binaries are
+        │                environmentally constrained, and FunC gives us
+        │                real verifiable bytecode compilation.
         ▼
 ┌───────────────────┐
-│ 7. Fift → BOC      │  assemble Fift output into a BOC (bag of cells) —
-└───────────────────┘  can reuse TON's existing Fift toolchain rather
-        │                than reimplementing an assembler
+│ 7. FunC → BOC      │  uses @ton-community/func-js to compile the FunC
+└───────────────────┘  output into a BOC (bag of cells).
         ▼
 ┌───────────────────┐
 │ 8. Node/TS-        │  a thin wrapper (mirroring tolk-js's shape:
@@ -82,14 +82,14 @@ compiler's job, entirely.
 |---|---|---|
 | Lexer/Parser | `surface_syntax.py`'s brace-matching + header regex | Proof of concept only — no expression grammar, no literals beyond what the test contracts needed, no error recovery |
 | Type Checking | Nothing yet — every prototype assumed types were already resolved (e.g. `addr`, `coins`, `uint64` were just dict lookups in `layout.py`) | Not started |
-| Linear Consumption | `linear.py`, the `Consume`/`Return` logic in `session_types.py` | Logic validated in isolation; never run as a pass over a real parsed AST |
+| Linear Consumption | `linear.py`, the `Consume`/`Return` logic in `session_types.py` | Running as a pass over the real parsed AST (`compiler/src/typecheck/checker.ts`), path-sensitive across `if`/`else`/`else if` — every execution path through a handler body is walked independently and must balance `consume(self)`. Still scoped to what the grammar has: no loops, no helper functions, no interprocedural calls |
 | Contextual Effects | `bounce_check.py` | Same — validated on hand-built call graphs, not parser output |
 | Monomorphization | `monomorphize.py` | Same |
 | State × Message Matrix | `unified_totality.py`, `surface_syntax.py`'s exhaustiveness check | This one *was* run against real parsed source (the counter contract) — furthest along of any pass |
 | Concurrent Pending-Map | `concurrent_legs.py`, `lazy_sweep.py` | Validated as a runtime simulation, not as a compile-time lowering pass — there's a real design gap here: the prototypes modeled *execution*, not *how the type checker statically verifies a Map<QueryId,_>-shaped state before any message ever arrives* |
 | WCG / Gas | `gas_bound.py`, `wcg_analyzer.py` | Validated against hand-built IR; never connected to a real function body from parsed source |
 | Cell Layout | `layout.py`, `hotfield.py`, `cooccurrence.py` | Has a known unfixed bug (spec §6) — do not wire this in as-is |
-| **Codegen** | **Nothing.** No prototype in this session touches TVM instructions, Fift, or bytecode at any point. | **Not started, and the highest-effort remaining piece by a wide margin** |
+| **Codegen** | **AST → FunC text → BOC.** | **Implemented for base language features.** Targets FunC text instead of Fift (a pragmatic choice for verification). |
 
 ## 4. The Honest Sequencing
 
@@ -113,13 +113,7 @@ Given the table above, the order that avoids wasted work is:
    a runtime simulation — this is genuinely unfinished design work, not
    just an implementation gap, and should happen before codegen depends
    on it.
-5. **Codegen last, and treat it as its own multi-stage project**: decide
-   whether to target Fift text (reusing TON's existing Fift→BOC
-   assembler, lower implementation risk) or emit BOC directly
-   (higher risk, no dependency on shelling out to Fift). Targeting Fift
-   text is the pragmatic choice — it's exactly what Tolk and FunC both
-   do, per TON's own docs, so it's a proven target with existing
-   tooling rather than a novel one.
+5. **Codegen**: Decided to target FunC text instead of Fift text. This was pulled forward in priority because it's required for deploying contracts that don't need layers 2/3/5/6 (like the counter). Targeting FunC text allows us to use `@ton-community/func-js` directly to get real bytecode, rather than hand-rolling Fift or TVM assembly without a verifier.
 6. **The Node/TS wrapper and `.compile.ts` integration is the easy part,
    last.** Once step 5 produces real Fift/BOC output from real `.bunzou`
    source, wrapping it to match `tolk-js`'s call shape is small,

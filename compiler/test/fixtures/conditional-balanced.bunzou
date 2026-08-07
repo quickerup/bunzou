@@ -1,0 +1,15 @@
+state ToggleState {
+    On
+}
+
+behavior On {
+    on Flip(msg) -> On {
+        if (msg.approved) {
+            consume(self);
+            return On;
+        } else {
+            reject("not approved");
+            return self;
+        }
+    }
+}

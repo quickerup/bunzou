@@ -17,6 +17,7 @@ export interface Token {
 const KEYWORDS = new Set([
   'state', 'struct', 'behavior', 'on', 'return', 'consume', 'require',
   'reject', 'get_method', 'self', 'true', 'false', 'transient',
+  'if', 'else',
 ]);
 
 // Multi-char punctuation must be checked longest-first.

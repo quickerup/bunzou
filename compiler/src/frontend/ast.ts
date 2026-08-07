@@ -1,10 +1,12 @@
-// AST for stage 1 (lexer/parser + type checker). Covers exactly the surface
-// syntax the spec demonstrates as working (spec §5, the counter contract) and
-// the guide's terminology (state / struct / behavior / on / consume / return
-// / require / reject / get_method). `transient` + `ttl` are parsed (dev guide
-// §2 says every transient state needs a ttl) but their downstream semantics
-// (Layer 5 pending-map lowering) are explicitly unformalized per spec §6 —
-// treat TransientInfo as a parsed placeholder, not a checked construct yet.
+// AST for stage 1 (lexer/parser + type checker). Covers the surface syntax
+// the spec demonstrates as working (spec §5, the counter contract), the
+// guide's terminology (state / struct / behavior / on / consume / return /
+// require / reject / get_method), and if/else branching (needed for Layer 1's
+// balanced-consumption-across-branches rule; see checker.ts's walkBlock).
+// `transient` + `ttl` are parsed (dev guide §2 says every transient state
+// needs a ttl) but their downstream semantics (Layer 5 pending-map lowering)
+// are explicitly unformalized per spec §6 — treat TransientInfo as a parsed
+// placeholder, not a checked construct yet.
 
 export interface Position {
   line: number;
@@ -42,7 +44,7 @@ export interface StructDecl {
   pos: Position;
 }
 
-export type Stmt = ExprStmt | ReturnStmt;
+export type Stmt = ExprStmt | ReturnStmt | IfStmt;
 
 export interface ExprStmt {
   kind: 'ExprStmt';
@@ -53,6 +55,16 @@ export interface ExprStmt {
 export interface ReturnStmt {
   kind: 'ReturnStmt';
   value: Expr;
+  pos: Position;
+}
+
+export interface IfStmt {
+  kind: 'IfStmt';
+  cond: Expr;
+  thenBranch: Stmt[];
+  // null means no `else` was written — the fall-through path carries the
+  // pre-if state forward unchanged, same as an empty else block would.
+  elseBranch: Stmt[] | null;
   pos: Position;
 }
 
