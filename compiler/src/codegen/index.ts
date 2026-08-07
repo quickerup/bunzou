@@ -19,7 +19,7 @@ export async function compileProgram(program: Program): Promise<CodegenResult> {
     });
 
     if (result.status === 'error') {
-        throw new Error(`FunC compile error: ${result.message}`);
+        throw new Error(`FunC compile error: ${result.message}\n\nGenerated FunC source:\n${funcSource}`);
     }
 
     return {
